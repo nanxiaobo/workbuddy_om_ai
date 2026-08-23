@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0f0f14" />
+  <title>用户管理 · 沉浸对话</title>
+  <link rel="stylesheet" href="/css/style.css?v=23" />
+  <style>
+    .admin-wrap { display: flex; height: 100vh; }
+    .admin-sidebar {
+      width: 260px; flex-shrink: 0; background: var(--bg-soft); border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; padding: 16px; gap: 12px;
+    }
+    .admin-sidebar .brand { font-weight: 800; font-size: 18px; letter-spacing: 1px; }
+    .admin-sidebar .sub { font-size: 12px; color: var(--text-dim); margin-top: -8px; }
+    .admin-sidebar .back {
+      margin-top: auto; background: var(--surface); border: 1px solid var(--border); color: var(--text);
+      padding: 10px; border-radius: 11px; font-size: 13px; font-weight: 600; text-decoration: none; text-align: center;
+    }
+    .admin-sidebar .back:hover { background: var(--surface-2); }
+    .admin-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+    .admin-head {
+      padding: 14px 22px; border-bottom: 1px solid var(--border); background: var(--bg-soft);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .admin-head h1 { font-size: 16px; margin: 0; }
+    .admin-body { flex: 1; overflow-y: auto; padding: 22px; }
+
+    .user-table {
+      width: 100%; border-collapse: collapse; font-size: 13px;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 14px; overflow: hidden;
+    }
+    .user-table th, .user-table td { padding: 12px 14px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    .user-table th { background: var(--surface-2); color: var(--text-dim); font-weight: 600; }
+    .user-table tr:hover td { background: rgba(255,255,255,0.03); }
+    .user-table tr.active td { background: rgba(139,124,246,0.12); }
+    .user-table .stats { display: flex; gap: 12px; color: var(--text-dim); font-size: 12px; flex-wrap: wrap; }
+    .user-table .tag {
+      font-size: 10px; color: var(--accent); border: 1px solid var(--accent);
+      border-radius: 4px; padding: 0 5px; margin-left: 6px;
+    }
+    .user-table .acts { display: flex; gap: 6px; flex-wrap: wrap; }
+    .user-table button { font-size: 12px; padding: 5px 10px; border-radius: 8px; border: none; }
+    .user-table .btn-view { background: var(--accent); color: #fff; }
+    .user-table .btn-edit { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); }
+
+    /* API Key 内联编辑 */
+    .key-cell { display: flex; gap: 6px; align-items: center; min-width: 240px; }
+    .key-input {
+      flex: 1; min-width: 0; font-family: ui-monospace, "JetBrains Mono", Consolas, monospace;
+      font-size: 12px; padding: 6px 8px; border-radius: 8px; background: var(--bg-soft);
+      border: 1px solid var(--border); color: var(--text);
+    }
+    .key-input:focus { outline: none; border-color: var(--accent); }
+    .key-input.empty { color: var(--text-dim); font-style: italic; }
+    .key-act { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: 8px;
+               padding: 5px 10px; font-size: 12px; cursor: pointer; }
+    .key-act:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .key-act.saved { background: rgba(78,211,107,.18); color: #4ed36b; border-color: rgba(78,211,107,.4); }
+    .key-act.clear { color: var(--danger); }
+    .key-act.clear:hover { background: var(--danger); color: #fff; border-color: var(--danger); }
+
+    .detail-panel {
+      margin-top: 18px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 18px;
+    }
+    .detail-head {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      margin-bottom: 14px;
+    }
+    .detail-close {
+      background: var(--surface-2); border: 1px solid var(--border); color: var(--text-dim);
+      width: 30px; height: 30px; border-radius: 50%; font-size: 14px; line-height: 1;
+      display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 0;
+      transition: color .15s, background .15s, border-color .15s;
+    }
+    .detail-close:hover { color: var(--danger); background: rgba(255,90,95,.10); border-color: var(--danger); }
+    .detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+    .detail-tabs { display: flex; gap: 8px; margin: 16px 0 12px; }
+    .detail-tab {
+      padding: 8px 14px; border-radius: 10px; background: var(--bg-soft); border: 1px solid var(--border);
+      color: var(--text-dim); font-size: 13px; cursor: pointer;
+    }
+    .detail-tab.active { color: var(--text); border-color: var(--accent); background: var(--surface-2); }
+
+    .activity-list, .entity-list { display: flex; flex-direction: column; gap: 8px; max-height: 360px; overflow-y: auto; }
+    .activity-item {
+      font-size: 12.5px; padding: 10px 12px; background: var(--bg-soft); border: 1px solid var(--border);
+      border-radius: 10px; display: flex; gap: 10px;
+    }
+    .activity-item .time { color: var(--text-dim); white-space: nowrap; }
+    .activity-item .act { color: var(--accent); font-weight: 600; min-width: 90px; }
+    .activity-item .detail { flex: 1; color: var(--text); }
+    .entity-item {
+      padding: 10px 12px; background: var(--bg-soft); border: 1px solid var(--border);
+      border-radius: 10px; font-size: 13px;
+    }
+    .entity-item .title { font-weight: 600; }
+    .entity-item .meta { color: var(--text-dim); font-size: 11.5px; margin-top: 4px; }
+    .muted { color: var(--text-dim); font-size: 13px; padding: 8px 0; }
+
+    .edit-user-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; align-items: end; }
+    .edit-user-form .field { margin: 0; }
+
+    .page-tip {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px;
+      font-size: 12.5px; color: var(--text-dim); margin-bottom: 16px; line-height: 1.6;
+    }
+    .page-tip b { color: var(--text); }
+
+    @media (max-width: 720px) {
+      .admin-sidebar { width: 100%; position: fixed; bottom: 0; left: 0; height: auto; flex-direction: row; z-index: 40; border-top: 1px solid var(--border); border-right: none; }
+      .admin-sidebar .brand, .admin-sidebar .sub { display: none; }
+      .admin-sidebar .back { margin-top: 0; }
+      .admin-main { padding-bottom: 60px; }
+      .user-table { font-size: 12px; }
+      .user-table .stats { flex-direction: column; gap: 2px; }
+      .key-cell { min-width: 160px; }
+    }
+  </style>
+</head>
+<body>
+  <!-- 每次进入都强制重新登录（不读 localStorage），不允许免登录直接进入用户管理 -->
+  <div id="login-screen">
+    <div class="login-card">
+      <div class="login-brand">沉浸对话</div>
+      <div class="login-sub">用户管理 · 仅管理员</div>
+      <label class="field"><span>用户名</span><input id="login-user" value="admin" autocomplete="username" /></label>
+      <label class="field"><span>密码</span><input id="login-pass" type="password" autocomplete="current-password" /></label>
+      <button class="btn primary login-btn" id="btn-login">登 录</button>
+      <div class="login-hint" id="login-hint"></div>
+      <div class="login-tip">此页面每次访问都会要求重新登录</div>
+    </div>
+  </div>
+
+  <div id="app" class="hidden">
+    <div class="admin-wrap">
+      <aside class="admin-sidebar">
+        <div class="brand">沉浸对话</div>
+        <div class="sub">后台用户管理</div>
+        <a class="back" href="/">← 返回聊天</a>
+      </aside>
+      <main class="admin-main">
+        <div class="admin-head">
+          <h1>👤 用户管理</h1>
+          <div style="font-size:13px;color:var(--text-dim)">管理员：<span id="admin-name"></span></div>
+        </div>
+        <div class="admin-body">
+
+          <div class="page-tip">
+            👋 欢迎进入用户管理后台。本页对所有人访问都会要求重新登录，<b>不会保留会话</b>。<br>
+            🔑 每个用户的 API Key 独立保存；在下方表格里直接编辑 / 清空，<b>明文展示</b>，保存即生效。
+          </div>
+
+          <table class="user-table">
+            <thead><tr>
+              <th>用户名</th><th>角色</th><th>API Key（明文）</th><th>数据概览</th><th>创建时间</th><th>操作</th>
+            </tr></thead>
+            <tbody id="user-table-body"></tbody>
+          </table>
+          <div id="detail-root"></div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="/js/shared.js?v=23"></script>
+  <script src="/js/users.js?v=23"></script>
+</body>
+</html>

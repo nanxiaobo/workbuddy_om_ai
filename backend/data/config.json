@@ -1,0 +1,15 @@
+{
+  "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  "api_key": "sk-b8f26e6542cd4847af29f9f122f060f1",
+  "model": "qwen-turbo",
+  "temperature": 1.5,
+  "max_tokens": 512,
+  "context_rounds": 30,
+  "theme": "light",
+  "stream": true,
+  "system_note": "",
+  "image_api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  "image_api_key": "",
+  "image_model": "wanx-v1",
+  "image_size": "1024x1024"
+}

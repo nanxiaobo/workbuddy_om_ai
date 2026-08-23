@@ -14,8 +14,8 @@ db.py —— SQLite 持久化层
 所有函数均为同步实现；在 FastAPI 中通过 run_in_threadpool 调用，避免阻塞事件循环。
 
 数据持久化保证：
-  - 数据库路径使用 backend/app.db 绝对路径，与启动目录无关。
-  - 初始化时自动备份 app.db -> app.db.bak（保留最近 3 份滚动备份）。
+  - 数据库位于 backend/data/app.db（绝对路径，与启动目录无关）。
+  - 初始化时自动备份到 backend/data/backups/app.bak（使用 os.replace 覆盖，保留最近 1 份）。
   - 所有表结构变更均为「新增列/新增表」，不会 DROP 已有数据。
 """
 import os
@@ -28,8 +28,13 @@ import glob
 import json
 from datetime import datetime, timezone
 
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app.db")
-BACKUP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "backups")
+# 路径：项目根 → backend/data/。无论从哪里启动，db.py 都在 backend/，取它的兄弟目录 data/。
+_BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
+_DATA_DIR = os.path.join(_BACKEND_DIR, "data")
+os.makedirs(_DATA_DIR, exist_ok=True)
+
+DB_PATH = os.path.join(_DATA_DIR, "app.db")
+BACKUP_DIR = os.path.join(_DATA_DIR, "backups")
 
 # 默认管理员账户（仅用于首次初始化，可在数据库或后台用户管理页改密码）
 DEFAULT_ADMIN_USER = "admin"
@@ -113,7 +118,9 @@ def init_db() -> None:
             CREATE TABLE IF NOT EXISTS tokens (
                 token       TEXT PRIMARY KEY,
                 username    TEXT NOT NULL,
-                created_at  TEXT
+                created_at  TEXT,
+                last_seen_at TEXT,
+                expires_at  TEXT
             );
             CREATE TABLE IF NOT EXISTS characters (
                 id              TEXT PRIMARY KEY,
@@ -177,6 +184,12 @@ def init_db() -> None:
         _ensure_column(conn, "characters", "refs", "refs TEXT DEFAULT ''")
         _ensure_column(conn, "messages", "image", "image TEXT DEFAULT ''")
         _ensure_column(conn, "users", "role", "role TEXT DEFAULT 'user'")
+        # 单用户独立 API Key（管理员可在用户管理页分配/清空；普通用户不能读取或修改）
+        _ensure_column(conn, "users", "api_key", "api_key TEXT DEFAULT ''")
+        _ensure_column(conn, "users", "image_api_key", "image_api_key TEXT DEFAULT ''")   # 每位用户独立图像 key（v4 起，留空回退到 api_key）
+        # 登录令牌：到期时间 + 最近活跃时间（用于自动续期 + 离线清理）
+        _ensure_column(conn, "tokens", "expires_at", "expires_at TEXT")
+        _ensure_column(conn, "tokens", "last_seen_at", "last_seen_at TEXT")
         conn.commit()
     finally:
         conn.close()
@@ -222,11 +235,12 @@ def verify_user(username: str, password: str) -> bool:
 
 
 def list_users() -> list:
-    """列出所有用户（仅用于管理员管理）。"""
+    """列出所有用户（仅用于管理员管理）。api_key / image_api_key 字段直接返回明文，方便管理员在用户管理页
+    查看 / 修改（不做隐私掩码；管理员本身的界面就是特权入口）。"""
     conn = get_conn()
     try:
         rows = conn.execute(
-            "SELECT id, username, role, created_at FROM users ORDER BY created_at ASC"
+            "SELECT id, username, role, created_at, api_key, image_api_key FROM users ORDER BY created_at ASC"
         ).fetchall()
         return [dict(r) for r in rows]
     finally:
@@ -234,10 +248,12 @@ def list_users() -> list:
 
 
 def get_user_by_id(uid: str) -> dict:
+    """按 id 取用户；返回明文 api_key / image_api_key 供管理员查看 / 修改。"""
     conn = get_conn()
     try:
         row = conn.execute(
-            "SELECT id, username, role, created_at FROM users WHERE id=?", (uid,)
+            "SELECT id, username, role, created_at, api_key, image_api_key FROM users WHERE id=?",
+            (uid,),
         ).fetchone()
         return dict(row) if row else None
     finally:
@@ -245,12 +261,70 @@ def get_user_by_id(uid: str) -> dict:
 
 
 def get_user_by_username(username: str) -> dict:
+    """按用户名取用户；返回明文 api_key / image_api_key 供后端 LLM 调用使用。"""
     conn = get_conn()
     try:
         row = conn.execute(
-            "SELECT id, username, role, created_at FROM users WHERE username=?", (username,)
+            "SELECT id, username, role, created_at, api_key, image_api_key FROM users WHERE username=?",
+            (username,),
         ).fetchone()
         return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def get_user_api_key(username: str) -> str:
+    """读取某用户的对话 API Key（明文，仅内部调用，勿对外暴露）。不存在返回空串。"""
+    if not username:
+        return ""
+    conn = get_conn()
+    try:
+        row = conn.execute("SELECT api_key FROM users WHERE username=?", (username,)).fetchone()
+        if not row:
+            return ""
+        return (row["api_key"] or "").strip()
+    finally:
+        conn.close()
+
+
+def get_user_image_api_key(username: str) -> str:
+    """读取某用户的图像生成 API Key（明文，仅内部调用）。不存在或为空返回空串（调用方回退到 api_key）。"""
+    if not username:
+        return ""
+    conn = get_conn()
+    try:
+        row = conn.execute("SELECT image_api_key FROM users WHERE username=?", (username,)).fetchone()
+        if not row:
+            return ""
+        return (row["image_api_key"] or "").strip()
+    finally:
+        conn.close()
+
+
+def set_user_api_key(uid: str, api_key: str) -> dict:
+    """管理员给指定用户写入 / 清空对话 API Key。传空字符串等同于清空。"""
+    conn = get_conn()
+    try:
+        row = conn.execute("SELECT username FROM users WHERE id=?", (uid,)).fetchone()
+        if not row:
+            raise ValueError("用户不存在")
+        conn.execute("UPDATE users SET api_key=? WHERE id=?", (api_key or "", uid))
+        conn.commit()
+        return get_user_by_id(uid)
+    finally:
+        conn.close()
+
+
+def set_user_image_api_key(uid: str, image_api_key: str) -> dict:
+    """管理员给指定用户写入 / 清空图像 API Key。传空字符串等同于清空（调用时回退到 api_key）。"""
+    conn = get_conn()
+    try:
+        row = conn.execute("SELECT username FROM users WHERE id=?", (uid,)).fetchone()
+        if not row:
+            raise ValueError("用户不存在")
+        conn.execute("UPDATE users SET image_api_key=? WHERE id=?", (image_api_key or "", uid))
+        conn.commit()
+        return get_user_by_id(uid)
     finally:
         conn.close()
 
@@ -341,13 +415,30 @@ def change_password(username: str, new_password: str) -> None:
         conn.close()
 
 
-def create_token(username: str) -> str:
+# 登录 token 的默认有效期（秒）：7 天。每次校验成功会按此值自动续期到当前时间 + 7 天。
+# 这意味着只要用户在 7 天内有任意活动（登录 / 调用接口 / 心跳），会话就一直保持有效。
+DEFAULT_TOKEN_TTL_SECONDS = 7 * 24 * 3600
+
+
+def _now_plus(seconds: int) -> str:
+    return datetime.fromtimestamp(datetime.now(timezone.utc).timestamp() + seconds, timezone.utc).isoformat()
+
+
+def create_token(username: str, ttl_seconds: int = DEFAULT_TOKEN_TTL_SECONDS) -> str:
+    """签发新的登录令牌，同时写入 expires_at = now + ttl_seconds。
+    - ttl_seconds <= 0 表示长期 token（基本不会过期）。
+    - 老库中没有 expires_at 的旧 token 仍能继续工作（validate_token 自动按需续期）。"""
     token = secrets.token_hex(32)
     conn = get_conn()
     try:
+        if ttl_seconds and ttl_seconds > 0:
+            expires_at = _now_plus(ttl_seconds)
+        else:
+            expires_at = None
         conn.execute(
-            "INSERT INTO tokens (token,username,created_at) VALUES (?,?,?)",
-            (token, username, _now()),
+            "INSERT INTO tokens (token,username,created_at,last_seen_at,expires_at) "
+            "VALUES (?,?,?,?,?)",
+            (token, username, _now(), _now(), expires_at),
         )
         conn.commit()
         return token
@@ -355,16 +446,109 @@ def create_token(username: str) -> str:
         conn.close()
 
 
-def validate_token(token: str):
-    """校验令牌，返回用户名；无效返回 None。"""
+def validate_token(token: str, auto_extend: bool = True):
+    """校验令牌。
+
+    返回值：
+        命中且有效 → 字符串用户名。
+        不存在或已过期 → None（让上层拒绝请求）。
+
+    自动续期策略（auto_extend=True）：
+        - 仅当 expires_at 有值时才续期；过期才续期没有意义。
+        - 续期方式：若距离到期时间 < 1 天，立刻把 expires_at 重新拉满到 now + DEFAULT_TOKEN_TTL_SECONDS，
+          避免每次接口都写库。
+        - 每次成功都会更新 last_seen_at，方便后续清理/审计。
+    """
     if not token:
         return None
     conn = get_conn()
     try:
         row = conn.execute(
-            "SELECT username FROM tokens WHERE token=?", (token,)
+            "SELECT username, expires_at FROM tokens WHERE token=?", (token,)
         ).fetchone()
-        return row["username"] if row else None
+        if not row:
+            return None
+        expires_at = row["expires_at"]
+        username = row["username"]
+        # 检查是否过期（仅当 expires_at 有值时才检查；老库空值视为永久有效）
+        if expires_at:
+            try:
+                exp_dt = datetime.fromisoformat(expires_at)
+                if datetime.now(timezone.utc) >= exp_dt:
+                    # 已过期，立刻从库中清除（便于下次请求快速失败）
+                    conn.execute("DELETE FROM tokens WHERE token=?", (token,))
+                    conn.commit()
+                    return None
+            except Exception:
+                # 解析失败按永久有效处理，避免锁用户
+                pass
+        if auto_extend:
+            # 仅在 expires_at 临近过期时（<= 1 天）才刷库续期，省 IO
+            needs_write = False
+            new_expires = None
+            if expires_at:
+                try:
+                    exp_dt = datetime.fromisoformat(expires_at)
+                    remaining = (exp_dt - datetime.now(timezone.utc)).total_seconds()
+                    if remaining < 24 * 3600:
+                        needs_write = True
+                        new_expires = _now_plus(DEFAULT_TOKEN_TTL_SECONDS)
+                except Exception:
+                    pass
+            else:
+                # 老 token：写入 expires_at，相当于"首次激活"
+                needs_write = True
+                new_expires = _now_plus(DEFAULT_TOKEN_TTL_SECONDS)
+            if needs_write:
+                conn.execute(
+                    "UPDATE tokens SET last_seen_at=?, expires_at=? WHERE token=?",
+                    (_now(), new_expires, token),
+                )
+            else:
+                conn.execute(
+                    "UPDATE tokens SET last_seen_at=? WHERE token=?",
+                    (_now(), token),
+                )
+            conn.commit()
+        return username
+    finally:
+        conn.close()
+
+
+def extend_token(token: str) -> bool:
+    """轻量级 token 续期接口：把 last_seen_at 与 expires_at 都更新到当前 + TTL。
+    主要用于前端心跳，确保"活跃用户"的登录态始终滚动有效。返回 False 表示 token 已失效。"""
+    if not token:
+        return False
+    conn = get_conn()
+    try:
+        row = conn.execute("SELECT expires_at FROM tokens WHERE token=?", (token,)).fetchone()
+        if not row:
+            return False
+        new_expires = _now_plus(DEFAULT_TOKEN_TTL_SECONDS)
+        conn.execute(
+            "UPDATE tokens SET last_seen_at=?, expires_at=? WHERE token=?",
+            (_now(), new_expires, token),
+        )
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+def purge_expired_tokens() -> int:
+    """清理已经过期的 token（多数情况由 validate_token 顺便完成；这里用于后台定期清理）。
+    返回删除条数。"""
+    conn = get_conn()
+    try:
+        now_iso = _now()
+        cur = conn.execute(
+            "DELETE FROM tokens WHERE expires_at IS NOT NULL AND expires_at <> '' AND expires_at < ?",
+            (now_iso,),
+        )
+        n = cur.rowcount or 0
+        conn.commit()
+        return n
     finally:
         conn.close()
 

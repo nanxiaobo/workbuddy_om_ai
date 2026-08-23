@@ -2,15 +2,30 @@
 config.py —— 全局配置（API 地址 / 密钥 / 模型 / 主题等）
 -----------------------------------------------------------------
 设计原则：
-  1. 不写死任何 API 密钥，全部由前端「设置面板」写入，后端持久化到 config.json。
-  2. 配置文件位于 backend/config.json，与代码分离，方便迁移与备份。
+  1. 不写死任何 API 密钥，全部由用户在「设置面板」或「用户管理」写入，存到 db.users.api_key。
+  2. 配置文件位于 backend/config.json，仅保存非密钥字段（api_base / model / temperature 等）。
   3. 默认给出阿里云灵积 DashScope 示例值，用户可在设置面板切换为本地 Ollama 等。
+
+多用户密钥隔离（v4）：
+  - 不再有「系统共享 key」概念。每个用户（含 admin）的对话 Key 存 db.users.api_key，
+    图像 Key 存 db.users.image_api_key；两者完全独立，可不同。
+  - LLM 调用时调 get_effective_config(username)：仅取该用户的两份 key。
+  - 图像生成调用 (llm.py / chat.py) 优先用 image_api_key，空串则回退到 api_key。
 """
 import json
 import os
 
-# 配置文件路径（与本文件同目录）
-CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+from typing import Optional
+
+# 配置文件路径：backend/data/config.json
+_BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
+_DATA_DIR = os.path.join(_BACKEND_DIR, "data")
+os.makedirs(_DATA_DIR, exist_ok=True)
+CONFIG_PATH = os.path.join(_DATA_DIR, "config.json")# 配置文件路径：backend/data/config.json
+_BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
+_DATA_DIR = os.path.join(_BACKEND_DIR, "data")
+os.makedirs(_DATA_DIR, exist_ok=True)
+CONFIG_PATH = os.path.join(_DATA_DIR, "config.json")
 
 # 默认配置：示例使用阿里云灵积 DashScope 的 OpenAI 兼容接口
 # 用户可在设置面板自由切换为本地 Ollama 或其他兼容服务
@@ -67,3 +82,32 @@ def update_config(patch: dict) -> dict:
     current = load_config()
     current.update(patch)
     return save_config(current)
+
+
+def get_effective_config(username: Optional[str] = None) -> dict:
+    """
+    返回指定用户「应当使用」的配置副本：
+      - api_base / model / temperature 等非密钥字段：取 config.json（系统默认）。
+      - api_key：仅从 db.users.api_key 读取该用户自己的 key。空串表示「该用户尚未配置」。
+      - image_api_key：从 db.users.image_api_key 独立读取；空串表示「沿用 api_key」。
+
+    不会修改 config.json，仅返回内存对象。
+    """
+    # 延迟导入避免循环依赖
+    import db
+
+    cfg = load_config()
+    user_key = db.get_user_api_key(username) if username else ""
+    user_image_key = db.get_user_image_api_key(username) if username else ""
+    cfg["api_key"] = user_key or ""
+    # image_api_key 独立：用户有就用自己的，没有就回退到对话 key
+    cfg["image_api_key"] = user_image_key or user_key or ""
+    return cfg
+
+
+def mask_config_for_non_admin(cfg: dict) -> dict:
+    """
+    兼容占位：v3 之后每位用户都用自己独立的 key，前端展示时不再做隐私掩码。
+    保留这个函数仅为不破坏旧 import；行为是「原样返回」。
+    """
+    return dict(cfg)

@@ -1,0 +1,25 @@
+{
+  "name": "沉浸对话 · AI 角色聊天",
+  "short_name": "沉浸对话",
+  "description": "支持自定义大模型与本地 Ollama 的沉浸式角色扮演聊天 App",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f0f14",
+  "theme_color": "#0f0f14",
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
