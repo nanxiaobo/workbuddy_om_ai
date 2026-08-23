@@ -274,6 +274,48 @@ function renderCharacters() {
     });
     grid.appendChild(el);
   });
+  // 同步渲染侧边栏的角色列表（移动端用），让侧边栏「角色库」tab 也能直接点选/编辑角色
+  renderSidebarCharacters();
+}
+
+/* 侧边栏内的角色列表：紧凑列表项，点击直接开聊，「编辑」按钮进编辑器 */
+function renderSidebarCharacters() {
+  const list = $('#char-list');
+  if (!list) return;
+  list.innerHTML = '';
+  if (state.characters.length === 0) {
+    // 空状态：直接给出「新建角色」入口，移动端也可一键触达
+    const empty = document.createElement('div');
+    empty.style.cssText = 'color:var(--text-dim);font-size:12px;padding:14px 10px;text-align:center;display:flex;flex-direction:column;gap:10px;align-items:center;';
+    empty.innerHTML = '<div>还没有角色</div>';
+    const btn = document.createElement('button');
+    btn.className = 'btn primary small';
+    btn.textContent = '＋ 新建角色';
+    btn.addEventListener('click', () => openCharEditor(null));
+    empty.appendChild(btn);
+    list.appendChild(empty);
+    return;
+  }
+  state.characters.forEach((c) => {
+    const desc = c.persona ? c.persona.slice(0, 30) : (c.tags || '暂无简介');
+    const el = document.createElement('div');
+    el.className = 'char-item';
+    el.innerHTML = `
+      ${avatarHTML(c.avatar, 'avatar')}
+      <div class="info">
+        <div class="name">${escapeHTML(c.name)}</div>
+        <div class="desc">${escapeHTML(desc)}</div>
+      </div>
+      <div class="acts">
+        <button class="mini-btn" data-act="edit" title="编辑">编辑</button>
+      </div>`;
+    el.addEventListener('click', (e) => {
+      if (e.target.getAttribute('data-act') === 'edit') { openCharEditor(c.id); return; }
+      // 点击角色卡片 → 直接开始/恢复对话（侧边栏会自动收起）
+      startConversation(c.id);
+    });
+    list.appendChild(el);
+  });
 }
 
 function renderConversations() {

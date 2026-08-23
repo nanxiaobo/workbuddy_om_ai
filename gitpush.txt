@@ -3,6 +3,8 @@ git add .
 git commit -m "提交"
 git push
 
+git pull
+
 sudo systemctl stop workbuddy
 sudo systemctl start workbuddy
 sudo systemctl status workbuddy
