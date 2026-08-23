@@ -358,9 +358,9 @@ $$('.sidebar-tabs .tab').forEach((t) => {
 });
 
 /* 移动端：侧边栏抽屉开关 */
-function isMobile() { return window.matchMedia('(max-width: 720px)').matches; }
-function openSidebar()  { document.body.classList.add('sidebar-open'); }
-function closeSidebar() { document.body.classList.remove('sidebar-open'); }
+function isMobile() { return window.matchMedia('(max-width: 720px)').matches(); }
+function openSidebar()  { document.body.classList.add('sidebar-open'); $('.sidebar').classList.add('open'); }
+function closeSidebar() { document.body.classList.remove('sidebar-open'); $('.sidebar').classList.remove('open'); }
 function toggleSidebar() {
   if (document.body.classList.contains('sidebar-open')) closeSidebar();
   else openSidebar();
@@ -591,11 +591,20 @@ function applyBackground(bg) {
 
 function renderHead() {
   const c = state.currentCharacter;
-  if (!c) return;
+  // 没选角色时清空头部、禁用编辑按钮
+  if (!c) {
+    $('#head-avatar').outerHTML = '<div class="avatar" id="head-avatar">🤖</div>';
+    $('#head-name').textContent = '未选择角色';
+    $('#head-sub').textContent = '从「角色库」选择角色开始对话';
+    const eb = $('#btn-edit-char'); if (eb) eb.disabled = true;
+    return;
+  }
   $('#head-avatar').outerHTML = avatarHTML(c.avatar, 'avatar').replace('class="avatar"', 'id="head-avatar" class="avatar"');
   $('#head-name').textContent = c.name || '角色';
   const cnt = (state.currentConv && state.currentConv.message_count) || 0;
   $('#head-sub').textContent = `已聊 ${cnt} 条 · 点击「记忆」查看 TA 记住的事`;
+  // 选了角色后启用编辑按钮
+  const eb = $('#btn-edit-char'); if (eb) eb.disabled = false;
 }
 
 function clearChat() {
@@ -841,11 +850,21 @@ async function deleteConversation(vid) {
   if (state.currentConv && state.currentConv.id === vid) {
     state.currentConv = null; state.currentCharacter = null;
     clearChat();
+    renderHead();
   }
   await loadConversations();
   renderConversations();
   toast('会话已删除');
 }
+
+/* 聊天头部：直接编辑当前角色资料 */
+$('#btn-edit-char').addEventListener('click', () => {
+  if (!state.currentCharacter) {
+    toast('请先选择一个角色');
+    return;
+  }
+  openCharEditor(state.currentCharacter.id);
+});
 
 /* =====================================================================
  * 聊天背景

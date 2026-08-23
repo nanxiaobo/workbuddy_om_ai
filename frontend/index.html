@@ -16,7 +16,7 @@
   <link rel="manifest" href="manifest.json" />
   <link rel="icon" href="icons/icon-192.png" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
-  <link rel="stylesheet" href="style.css?v=8" />
+  <link rel="stylesheet" href="style.css?v=9" />
 </head>
 <body>
   <!-- 登录屏（仅管理员，默认不支持注册；管理员可在设置中添加用户） -->
@@ -74,6 +74,7 @@
           </div>
         </div>
         <div class="chat-head-actions">
+          <button class="text-btn" id="btn-edit-char" title="编辑当前角色资料" disabled>✏️ 编辑角色</button>
           <button class="text-btn" id="btn-memory" title="角色记忆">🧠 记忆</button>
           <button class="text-btn" id="btn-bg" title="聊天背景">🎨 背景</button>
           <button class="text-btn" id="btn-portrait" title="生成人物当前状态图">🖼 状态图</button>
@@ -355,6 +356,6 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script src="app.js?v=9"></script>
+  <script src="app.js?v=10"></script>
 </body>
 </html>

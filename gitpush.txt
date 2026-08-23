@@ -3,7 +3,9 @@ git add .
 git commit -m "提交"
 git push
 
+cd ~/workbuddy_om_ai
 git pull
+sudo systemctl restart workbuddy
 
 sudo systemctl stop workbuddy
 sudo systemctl start workbuddy
