@@ -6,7 +6,7 @@
  *   - /api/*：永远走网络。
  *   - 版本号升级时（ai-chat-shell-vXX）自动清理所有旧 cache。
  */
-const VERSION = 'v25';
+const VERSION = 'v26';
 const CACHE = 'ai-chat-shell-' + VERSION;   // 每次大版本更新请改 VERSION
 const SHELL = [
   '/',

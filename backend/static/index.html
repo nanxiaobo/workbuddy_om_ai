@@ -16,7 +16,7 @@
   <link rel="manifest" href="manifest.json" />
   <link rel="icon" href="icons/icon-192.png" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
-  <link rel="stylesheet" href="/css/style.css?v=25" />
+  <link rel="stylesheet" href="/css/style.css?v=26" />
 </head>
 <body>
   <!-- 登录屏（仅管理员，默认不支持注册；管理员可在设置中添加用户） -->
@@ -71,6 +71,7 @@
           <div>
             <div class="chat-name" id="head-name">未选择角色</div>
             <div class="chat-sub" id="head-sub">从「角色库」选择角色开始对话</div>
+            <div class="char-state-bar hidden" id="char-state-bar"></div>
           </div>
         </div>
         <div class="chat-head-actions">
@@ -307,6 +308,13 @@
         </label>
       </div>
       <label class="field">
+        <details>
+          <summary style="cursor:pointer;color:var(--text-dim);font-weight:600;font-size:13px;padding:4px 0">🎭 人格参数（可选，影响角色决策与回复风格）</summary>
+          <div id="ce-personality-traits" style="margin-top:10px;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px 16px"></div>
+          <small>留空或保持 50 即为中性。数值越高该特质越强。</small>
+        </details>
+      </label>
+      <label class="field">
         <span>世界观 / 长篇设定（可选）</span>
         <textarea id="ce-world_setting" rows="3" placeholder="故事背景、世界规则等长文本"></textarea>
       </label>
@@ -357,7 +365,7 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script src="/js/shared.js?v=25"></script>
-  <script src="/js/app.js?v=25"></script>
+  <script src="/js/shared.js?v=26"></script>
+  <script src="/js/app.js?v=26"></script>
 </body>
 </html>

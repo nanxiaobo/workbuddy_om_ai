@@ -20,7 +20,15 @@ import httpx
 from config import get_config
 
 
-def build_system_prompt(character: dict, memories: list, extra_note: str = "") -> str:
+def build_system_prompt(
+    character: dict,
+    memories: list,
+    extra_note: str = "",
+    personality: dict = None,
+    emotion: dict = None,
+    relation: dict = None,
+    brain: dict = None,
+) -> str:
     """
     构建沉浸式系统提示词（复刻猫箱式代入机制）：
       - 强制代入角色，禁止跳出人设
@@ -28,7 +36,10 @@ def build_system_prompt(character: dict, memories: list, extra_note: str = "") -
       - 读取角色记忆，保持剧情/人物关系一致性
       - 支持日常 / 恋爱 / 脑洞剧情自然演绎
       - 鼓励在对话中融入丰富的心理活动与动作神态描写
+    V1 新增：注入结构化人格、当前情绪、关系阶段、Character Brain 指令。
     """
+    import character_system as cs
+
     name = character.get("name", "角色")
     parts = []
     parts.append(f"你现在就是{name}，请完全以{name}的身份、视角和语言进行对话，不要以AI或助手的身份回答。")
@@ -38,9 +49,23 @@ def build_system_prompt(character: dict, memories: list, extra_note: str = "") -
     if character.get("persona"):
         parts.append(f"【人物背景】\n{character['persona']}")
     if character.get("personality"):
-        parts.append(f"【性格】\n{character['personality']}")
+        parts.append(f"【性格（文字描述）】\n{character['personality']}")
     if character.get("speaking_style"):
         parts.append(f"【说话风格】\n{character['speaking_style']}")
+
+    # 结构化人格（角色系统 V1）
+    if personality:
+        pctx = cs.build_personality_context(personality)
+        if pctx:
+            parts.append(f"【人格参数】{pctx}")
+
+    # 当前情绪状态
+    if emotion:
+        parts.append(f"【当前情绪状态】{cs.build_emotion_context(emotion)}")
+
+    # 用户-角色关系
+    if relation:
+        parts.append(f"【与用户的关系】{cs.build_relation_context(relation)}")
 
     if memories:
         mem_text = "\n".join(f"- {m['content']}" for m in memories)
@@ -62,6 +87,13 @@ def build_system_prompt(character: dict, memories: list, extra_note: str = "") -
         "让演绎更有沉浸感与画面感；但不要把心理描写写成大段独白，点到为止、贴合情境。",
     ]
     parts.append("\n".join(rules))
+
+    # Character Brain 决策指令
+    if brain:
+        parts.append(f"【本轮角色决策（Character Brain）】\n{cs.build_brain_directives(brain)}")
+
+    # 降 AI 味规则
+    parts.append(cs.ANTI_AI_RULES)
 
     if extra_note:
         parts.append(f"【额外设定】\n{extra_note}")

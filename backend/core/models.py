@@ -71,6 +71,7 @@ class CharacterIn(BaseModel):
     greeting: str = ""
     tags: str = ""
     refs: Optional[list] = None
+    personality_traits: Optional[dict] = None   # 角色系统 V1：结构化人格参数
 
 
 # ----- 记忆 -----

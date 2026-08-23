@@ -25,6 +25,41 @@ const state = {
 // 编辑角色时暂存「参考图」列表（dataURL），保存时随角色卡一起提交
 let editingRefs = [];
 
+// 角色系统 V1：人格参数定义（与后端 character_system.py 对齐）
+const PERSONALITY_TRAITS = [
+  "温柔", "共情", "自信", "内向", "理性", "幽默", "独立", "好奇",
+  "耐心", "诚实", "调皮", "敏感", "嫉妒", "占有",
+];
+
+/* 渲染人格参数滑块到编辑器 */
+function renderPersonalitySliders(values) {
+  const box = $('#ce-personality-traits');
+  if (!box) return;
+  values = values || {};
+  box.innerHTML = PERSONALITY_TRAITS.map(trait => {
+    const v = values[trait] !== undefined ? values[trait] : 50;
+    return `<label class="field" style="margin:0">
+      <span>${trait} <b style="color:var(--accent)">${v}</b></span>
+      <input type="range" min="0" max="100" value="${v}" data-trait="${trait}" class="trait-slider" />
+    </label>`;
+  }).join('');
+  // 实时更新数值显示
+  $$('.trait-slider').forEach(s => {
+    s.addEventListener('input', () => {
+      s.parentElement.querySelector('b').textContent = s.value;
+    });
+  });
+}
+
+/* 收集人格参数为 dict */
+function collectPersonalityTraits() {
+  const result = {};
+  $$('.trait-slider').forEach(s => {
+    result[s.getAttribute('data-trait')] = parseInt(s.value, 10);
+  });
+  return result;
+}
+
 /* ---------- 工具 ---------- */
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
@@ -495,6 +530,8 @@ async function openCharEditor(id) {
   // 参考图：从角色卡载入，编辑期间存于 editingRefs
   editingRefs = Array.isArray(c.refs) ? c.refs.slice() : [];
   renderRefs();
+  // 人格参数（角色系统 V1）
+  renderPersonalitySliders(c.personality_traits);
   openModal('char-edit-modal');
 }
 
@@ -621,6 +658,7 @@ $('#btn-save-char').addEventListener('click', async () => {
     greeting: $('#ce-greeting').value,
     tags: $('#ce-tags').value,
     refs: editingRefs,
+    personality_traits: collectPersonalityTraits(),
   };
   try {
     if (state.editingCharId) {
@@ -759,6 +797,38 @@ function renderHead() {
   $('#head-sub').textContent = `已聊 ${cnt} 条 · 点击「记忆」查看 TA 记住的事`;
   // 选了角色后启用编辑按钮
   const eb = $('#btn-edit-char'); if (eb) eb.disabled = false;
+  // 加载角色状态（情绪 + 关系）
+  if (c.id) {
+    api('GET', '/api/characters/' + c.id + '/state').then(s => {
+      updateCharStateBar({ emotion: s.stage_name ? _emotionLabel(s.emotion) : '平静', stage: s.stage_name });
+    }).catch(() => {});
+  }
+}
+
+/* 把情绪 dict 转成文字标签（简易版，后端有完整版） */
+function _emotionLabel(e) {
+  if (!e) return '平静';
+  if (e['生气'] > 60) return '生气';
+  if (e['悲伤'] > 55) return '难过';
+  if (e['焦虑'] > 65) return '焦虑';
+  if (e['开心'] > 70) return '非常开心';
+  if (e['开心'] > 50) return '开心';
+  if (e['害羞'] > 50) return '害羞';
+  return '平静';
+}
+
+/* 更新聊天头部的角色状态条 */
+function updateCharStateBar(evt) {
+  const bar = $('#char-state-bar');
+  if (!bar) return;
+  const tags = [];
+  if (evt.emotion) tags.push(`<span class="cs-tag emotion">🙂 ${escapeHTML(evt.emotion)}</span>`);
+  if (evt.attitude) tags.push(`<span class="cs-tag">态度：${escapeHTML(evt.attitude)}</span>`);
+  if (evt.stage) tags.push(`<span class="cs-tag stage">${escapeHTML(evt.stage)}</span>`);
+  if (tags.length) {
+    bar.innerHTML = tags.join('');
+    bar.classList.remove('hidden');
+  }
 }
 
 function clearChat() {
@@ -992,6 +1062,9 @@ async function sendMessage() {
             bubble.textContent = full;
             bubble.appendChild(Object.assign(document.createElement('span'), { className: 'cursor' }));
             $('#messages').scrollTop = $('#messages').scrollHeight;
+          } else if (evt.type === 'brain') {
+            // 角色系统 V1：显示角色决策（情绪/态度/关系阶段）
+            updateCharStateBar(evt);
           } else if (evt.type === 'error') {
             if (!bubble) bubble = typingToBubble(typingEl);
             bubble.textContent = '⚠️ ' + evt.message;

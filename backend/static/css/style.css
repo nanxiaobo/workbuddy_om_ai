@@ -408,6 +408,17 @@ input[type="range"] { padding: 0; accent-color: var(--accent); }
 .mini-btn.danger { color: var(--danger); border-color: rgba(255,90,95,.35); }
 .mini-btn.danger:hover { background: rgba(255,90,95,.12); color: var(--danger); border-color: var(--danger); }
 
+/* 角色状态条（情绪 + 关系阶段） */
+.char-state-bar {
+  display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px;
+}
+.char-state-bar .cs-tag {
+  font-size: 10px; padding: 1px 7px; border-radius: 6px;
+  background: var(--surface-2); color: var(--text-dim); border: 1px solid var(--border);
+}
+.char-state-bar .cs-tag.emotion { color: var(--accent); border-color: rgba(139,124,246,.3); }
+.char-state-bar .cs-tag.stage { color: #fff; background: var(--user-bubble); border-color: var(--user-bubble); }
+
 /* 角色库 */
 .char-toolbar { display: flex; gap: 10px; }
 .char-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }

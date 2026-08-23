@@ -1,6 +1,7 @@
 """
 routers/chat.py —— 聊天 SSE 流式 + 配置测试
 包含 /api/chat（SSE 流式回复）+ /api/test（连通性测试）。
+V1：集成角色系统（人格 / 情绪 / 关系 / Character Brain）。
 """
 import json
 
@@ -11,6 +12,7 @@ from fastapi.responses import StreamingResponse
 from core.models import ChatIn, TestIn
 from core.security import current_user, is_admin, run_sync
 from llm import build_system_prompt, generate_inner, stream_chat, summarize_to_memory
+import character_system as cs
 import config as cfg_mod
 import db
 
@@ -25,6 +27,7 @@ async def api_chat(body: ChatIn, request: Request):
     SSE 事件格式（每行一个 JSON）：
       {"type":"delta","content":"片段"}      增量文本
       {"type":"inner","content":"心理活动"}   心理活动旁白（回复结束后推送）
+      {"type":"brain","emotion":"...","attitude":"...","stage":"..."}  角色决策（回复前推送）
       {"type":"summary","added":N}            自动总结记忆通知（每 50 条触发）
       {"type":"done","content":"完整回复"}     结束
       {"type":"error","message":"错误"}        出错
@@ -39,9 +42,24 @@ async def api_chat(body: ChatIn, request: Request):
     if not character:
         raise HTTPException(404, "角色不存在")
 
-    cfg = cfg_mod.get_effective_config(current_user(request))
+    user = current_user(request)
+    cfg = cfg_mod.get_effective_config(user)
+
+    # ===== 角色系统 V1：加载人格 / 情绪 / 关系 =====
+    personality = cs.parse_personality(character.get("personality_json"))
+    emotion = cs.parse_emotion(character.get("emotion_json"))
+    rel_row = run_sync(db.get_relation, user, conv["character_id"])
+    relation = cs.parse_relation(rel_row["relation_json"]) if rel_row else dict(cs.DEFAULT_RELATION)
+
+    # Character Brain：纯代码决策（不调 LLM）
+    signals = cs.analyze_message(body.user_message)
+    brain = cs.character_brain(character, personality, emotion, relation, body.user_message)
+
     memories = run_sync(db.list_memories, conv["character_id"])
-    system_prompt = build_system_prompt(character, memories, cfg.get("system_note", ""))
+    system_prompt = build_system_prompt(
+        character, memories, cfg.get("system_note", ""),
+        personality=personality, emotion=emotion, relation=relation, brain=brain,
+    )
 
     # 上下文记忆：取最近 N 轮历史 + 当前用户消息
     rounds = int(cfg.get("context_rounds", 30))
@@ -54,18 +72,31 @@ async def api_chat(body: ChatIn, request: Request):
 
     # 先把用户消息落库
     run_sync(db.add_message, body.conversation_id, "user", body.user_message)
-    user = current_user(request)
     run_sync(db.log_activity, user, "send_message",
              f"发送消息：{body.user_message[:30]}{'...' if len(body.user_message)>30 else ''}", body.conversation_id)
+
+    # ===== 角色系统 V1：先更新情绪 + 关系（基于用户消息，不依赖 LLM 是否成功） =====
+    try:
+        new_emotion = cs.update_emotion(emotion, personality, signals, brain)
+        new_relation = cs.update_relation(relation, new_emotion, signals, brain)
+        run_sync(db.set_character_emotion, conv["character_id"], cs.emotion_to_json(new_emotion))
+        run_sync(db.upsert_relation, user, conv["character_id"],
+                 cs.relation_to_json(new_relation), new_relation.get("stage", 0))
+    except Exception:
+        pass
 
     # 若会话标题仍是默认，用首条用户消息做标题
     if conv.get("title") in (None, "新对话", ""):
         title = body.user_message[:20]
         run_sync(db.touch_conversation, body.conversation_id, title)
 
+    # SSE 事件生成器
     async def event_gen():
         full = []
         try:
+            # 先推送 Character Brain 决策（让前端实时显示角色状态）
+            yield f"data: {json.dumps({'type':'brain', 'emotion': brain['emotion_label'], 'attitude': brain['attitude'], 'intent': brain['intent'], 'style': brain['style'], 'stage': cs.stage_name(new_relation.get('stage', 0))}, ensure_ascii=False)}\n\n"
+
             async for piece in stream_chat(messages, cfg):
                 if piece.startswith("[ERROR]"):
                     yield f"data: {json.dumps({'type':'error','message': piece[len('[ERROR]'):]}, ensure_ascii=False)}\n\n"

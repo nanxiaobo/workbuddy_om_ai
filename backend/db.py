@@ -190,10 +190,120 @@ def init_db() -> None:
         # 登录令牌：到期时间 + 最近活跃时间（用于自动续期 + 离线清理）
         _ensure_column(conn, "tokens", "expires_at", "expires_at TEXT")
         _ensure_column(conn, "tokens", "last_seen_at", "last_seen_at TEXT")
+        # 角色系统 V1：结构化人格 + 当前情绪（JSON 字符串）
+        _ensure_column(conn, "characters", "personality_json", "personality_json TEXT DEFAULT ''")
+        _ensure_column(conn, "characters", "emotion_json", "emotion_json TEXT DEFAULT ''")
         conn.commit()
     finally:
         conn.close()
+    _init_relation_table()
     init_users()
+
+
+def _init_relation_table() -> None:
+    """创建「用户-角色关系」表（角色系统 V1）。"""
+    conn = get_conn()
+    try:
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS character_relations (
+                id            TEXT PRIMARY KEY,
+                username      TEXT NOT NULL,
+                character_id  TEXT NOT NULL,
+                relation_json TEXT DEFAULT '',
+                stage         INTEGER DEFAULT 0,
+                last_interact TEXT,
+                updated_at   TEXT,
+                UNIQUE(username, character_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_rel_user ON character_relations(username);
+            CREATE INDEX IF NOT EXISTS idx_rel_char ON character_relations(character_id);
+        """)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# ------------------------- 人格 / 情绪（存 characters 表） -------------------------
+
+def get_character_personality(cid: str) -> str:
+    """读取角色的结构化人格 JSON 字符串。"""
+    conn = get_conn()
+    try:
+        row = conn.execute("SELECT personality_json FROM characters WHERE id=?", (cid,)).fetchone()
+        return row["personality_json"] if row else ""
+    finally:
+        conn.close()
+
+
+def set_character_personality(cid: str, personality_json: str) -> None:
+    """写入角色的结构化人格 JSON。"""
+    conn = get_conn()
+    try:
+        conn.execute("UPDATE characters SET personality_json=? WHERE id=?", (personality_json, cid))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_character_emotion(cid: str) -> str:
+    """读取角色当前情绪 JSON 字符串。"""
+    conn = get_conn()
+    try:
+        row = conn.execute("SELECT emotion_json FROM characters WHERE id=?", (cid,)).fetchone()
+        return row["emotion_json"] if row else ""
+    finally:
+        conn.close()
+
+
+def set_character_emotion(cid: str, emotion_json: str) -> None:
+    """写入角色当前情绪 JSON。"""
+    conn = get_conn()
+    try:
+        conn.execute("UPDATE characters SET emotion_json=? WHERE id=?", (emotion_json, cid))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# ------------------------- 用户-角色关系（存 character_relations 表） -------------------------
+
+def get_relation(username: str, character_id: str) -> dict:
+    """读取某用户与某角色的关系记录。不存在返回 None。"""
+    conn = get_conn()
+    try:
+        row = conn.execute(
+            "SELECT * FROM character_relations WHERE username=? AND character_id=?",
+            (username, character_id),
+        ).fetchone()
+        if not row:
+            return None
+        return dict(row)
+    finally:
+        conn.close()
+
+
+def upsert_relation(username: str, character_id: str, relation_json: str, stage: int) -> None:
+    """写入或更新关系记录。"""
+    conn = get_conn()
+    try:
+        now = _now()
+        existing = conn.execute(
+            "SELECT id FROM character_relations WHERE username=? AND character_id=?",
+            (username, character_id),
+        ).fetchone()
+        if existing:
+            conn.execute(
+                "UPDATE character_relations SET relation_json=?, stage=?, last_interact=?, updated_at=? WHERE id=?",
+                (relation_json, stage, now, now, existing["id"]),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO character_relations (id, username, character_id, relation_json, stage, last_interact, updated_at) VALUES (?,?,?,?,?,?,?)",
+                (_uid(), username, character_id, relation_json, stage, now, now),
+            )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def init_users() -> None:
@@ -611,12 +721,17 @@ def create_character(data: dict, user: str = "") -> dict:
     cid = data.get("id") or _uid()
     now = _now()
     refs = _serialize_refs(data.get("refs"))
+    # 结构化人格（角色系统 V1）
+    import character_system as cs
+    personality_json = ""
+    if data.get("personality_traits"):
+        personality_json = cs.personality_to_json(cs.parse_personality(data["personality_traits"]))
     conn = get_conn()
     try:
         conn.execute(
             """INSERT INTO characters
-               (id,name,avatar,persona,personality,speaking_style,example_dialogues,world_setting,greeting,tags,user,refs,created_at,updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               (id,name,avatar,persona,personality,speaking_style,example_dialogues,world_setting,greeting,tags,user,refs,personality_json,created_at,updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 cid,
                 data.get("name", "未命名角色"),
@@ -630,6 +745,7 @@ def create_character(data: dict, user: str = "") -> dict:
                 data.get("tags", ""),
                 user or data.get("user", ""),
                 refs,
+                personality_json,
                 now,
                 now,
             ),
@@ -652,6 +768,10 @@ def get_character(cid: str) -> dict:
             d["refs"] = json.loads(d.get("refs") or "[]")
         except Exception:
             d["refs"] = []
+        # 解析结构化人格为 dict（角色系统 V1）
+        import character_system as cs
+        d["personality_traits"] = cs.parse_personality(d.get("personality_json"))
+        d["emotion"] = cs.parse_emotion(d.get("emotion_json"))
         return d
     finally:
         conn.close()
@@ -716,6 +836,12 @@ def update_character(cid: str, data: dict) -> dict:
         if "refs" in data:
             fields.append("refs=?")
             vals.append(_serialize_refs(data["refs"]))
+        # 结构化人格（角色系统 V1）
+        if "personality_traits" in data:
+            import character_system as cs
+            pj = cs.personality_to_json(cs.parse_personality(data["personality_traits"]))
+            fields.append("personality_json=?")
+            vals.append(pj)
         if fields:
             fields.append("updated_at=?")
             vals.append(_now())

@@ -66,3 +66,22 @@ def api_export_character(cid: str):
     ch["_type"] = "ai-chat-character-card"
     ch["_version"] = "1.0"
     return ch
+
+
+@router.get("/api/characters/{cid}/state")
+def api_character_state(cid: str, request: Request):
+    """返回角色当前情绪 + 当前用户与该角色的关系（角色系统 V1）。"""
+    import character_system as cs
+    ch = run_sync(db.get_character, cid)
+    if not ch:
+        raise HTTPException(404, "角色不存在")
+    user = current_user(request)
+    emotion = cs.parse_emotion(ch.get("emotion_json"))
+    rel_row = run_sync(db.get_relation, user, cid)
+    relation = cs.parse_relation(rel_row["relation_json"]) if rel_row else dict(cs.DEFAULT_RELATION)
+    return {
+        "emotion": emotion,
+        "relation": relation,
+        "stage_name": cs.stage_name(relation.get("stage", 0)),
+        "personality": cs.parse_personality(ch.get("personality_json")),
+    }
