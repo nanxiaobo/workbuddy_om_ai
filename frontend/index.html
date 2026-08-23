@@ -2,13 +2,21 @@
 <html lang="zh-CN" data-theme="dark">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <meta name="theme-color" content="#0f0f14" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f0f14" media="(prefers-color-scheme: dark)" />
+  <meta name="theme-color" content="#f4f4f8" media="(prefers-color-scheme: light)" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="沉浸对话" />
+  <meta name="format-detection" content="telephone=no" />
+  <meta name="msapplication-tap-highlight" content="no" />
+  <meta name="color-scheme" content="dark light" />
   <title>沉浸对话 · AI 角色聊天</title>
   <link rel="manifest" href="manifest.json" />
   <link rel="icon" href="icons/icon-192.png" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
-  <link rel="stylesheet" href="style.css?v=7" />
+  <link rel="stylesheet" href="style.css?v=8" />
 </head>
 <body>
   <!-- 登录屏（仅管理员，默认不支持注册；管理员可在设置中添加用户） -->
@@ -31,6 +39,8 @@
   </div>
 
   <div id="app" class="hidden">
+    <!-- 移动端侧边栏遮罩（点击关闭侧边栏） -->
+    <div id="sidebar-backdrop"></div>
     <!-- 左侧边栏 -->
     <aside class="sidebar">
       <div class="sidebar-head">
@@ -55,6 +65,7 @@
     <!-- 主聊天区 -->
     <main class="chat">
       <div class="chat-head" id="chat-head">
+        <button class="icon-btn" id="btn-menu-toggle" title="菜单" aria-label="打开菜单">☰</button>
         <div class="chat-head-info">
           <div class="avatar" id="head-avatar">🤖</div>
           <div>
@@ -344,6 +355,6 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script src="app.js?v=7"></script>
+  <script src="app.js?v=8"></script>
 </body>
 </html>

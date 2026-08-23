@@ -40,13 +40,18 @@ body {
   color: var(--text);
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  overscroll-behavior: none;
+  touch-action: manipulation;
 }
-button { font-family: inherit; cursor: pointer; }
+button { font-family: inherit; cursor: pointer; touch-action: manipulation; }
 .hidden { display: none !important; }
 textarea, input { font-family: inherit; }
 
 /* ===== 布局 ===== */
-#app { display: flex; height: 100vh; }
+#app { display: flex; height: 100vh; height: 100dvh; }
 
 /* 侧边栏 */
 .sidebar {
@@ -57,6 +62,8 @@ textarea, input { font-family: inherit; }
   display: flex;
   flex-direction: column;
   padding: 14px;
+  padding-top: max(14px, env(safe-area-inset-top));
+  padding-bottom: max(14px, env(safe-area-inset-bottom));
   gap: 12px;
 }
 .sidebar-head { display: flex; align-items: center; justify-content: space-between; }
@@ -123,6 +130,9 @@ textarea, input { font-family: inherit; }
 .chat-head {
   display: flex; align-items: center; justify-content: space-between;
   padding: 12px 18px; border-bottom: 1px solid var(--border); background: var(--bg-soft);
+  padding-top: max(12px, env(safe-area-inset-top));
+  padding-left: max(18px, env(safe-area-inset-left));
+  padding-right: max(18px, env(safe-area-inset-right));
 }
 .chat-head-info { display: flex; align-items: center; gap: 12px; }
 .chat-name { font-weight: 700; font-size: 15px; }
@@ -177,6 +187,9 @@ textarea, input { font-family: inherit; }
 .composer {
   display: flex; gap: 10px; padding: 14px 18px; border-top: 1px solid var(--border);
   background: var(--bg-soft); align-items: flex-end;
+  padding-bottom: max(14px, env(safe-area-inset-bottom));
+  padding-left: max(18px, env(safe-area-inset-left));
+  padding-right: max(18px, env(safe-area-inset-right));
 }
 #input {
   flex: 1; resize: none; background: var(--surface); border: 1px solid var(--border);
@@ -284,10 +297,138 @@ input[type="range"] { padding: 0; accent-color: var(--accent); }
 
 /* 移动端适配 */
 @media (max-width: 720px) {
-  .sidebar { position: fixed; z-index: 40; height: 100%; transform: translateX(-100%); transition: transform .25s; }
+  /* 侧边栏：默认隐藏，抽屉式滑入 */
+  .sidebar {
+    position: fixed; z-index: 40;
+    width: min(82vw, 320px);
+    height: 100%; height: 100dvh;
+    transform: translateX(-100%);
+    transition: transform .25s ease;
+    box-shadow: 0 0 30px rgba(0,0,0,0.4);
+  }
   .sidebar.open { transform: translateX(0); }
   .chat { width: 100%; }
   .msg { max-width: 90%; }
+
+  /* 弹窗全屏：手机屏幕小，弹窗更适合全屏显示 */
+  .modal {
+    width: 100vw; height: 100dvh; max-height: 100dvh;
+    top: 0; left: 0; transform: none;
+    border-radius: 0; border: none;
+  }
+  .modal-head {
+    padding: 14px 16px;
+    padding-top: max(14px, env(safe-area-inset-top));
+  }
+  .modal-body { padding: 14px 16px; }
+  .modal-foot { padding-bottom: env(safe-area-inset-bottom); }
+
+  /* 登录卡片缩小一点 */
+  .login-card { width: min(360px, 92vw); padding: 26px 22px; }
+
+  /* 表单行在手机上单列堆叠，避免两个输入框挤在一起 */
+  .row { flex-direction: column; gap: 10px; }
+  .row.password-row, .row.user-add { flex-direction: column; }
+  .row .field { width: 100%; }
+
+  /* 聊天头部：信息块缩窄，操作按钮横向滚动 */
+  .chat-head {
+    flex-wrap: nowrap;
+    padding: 10px 12px;
+    padding-top: max(10px, env(safe-area-inset-top));
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
+    gap: 10px;
+  }
+  .chat-head-info { min-width: 0; flex: 1 1 auto; gap: 8px; }
+  .chat-name { font-size: 14px; }
+  .chat-sub { font-size: 11.5px; }
+  .chat-head .avatar { width: 36px; height: 36px; font-size: 19px; }
+  .chat-head-actions {
+    flex: 0 0 auto;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    gap: 6px;
+    max-width: 60vw;
+    padding-bottom: 2px;
+  }
+  .chat-head-actions::-webkit-scrollbar { display: none; }
+  .chat-head-actions .text-btn {
+    padding: 7px 11px;
+    font-size: 12.5px;
+    white-space: nowrap;
+    flex-shrink: 0;
+    min-height: 36px;
+  }
+
+  /* 输入框防 iOS 自动缩放 + 优化触控 */
+  #input, .field input, .field textarea, .mem-item textarea, #mem-input {
+    font-size: 16px;
+  }
+  #input { padding: 11px 14px; }
+  .send-btn { min-width: 64px; padding: 0 16px; }
+  .composer { gap: 8px; padding: 10px 12px; }
+
+  /* 角色库：手机上一列两卡 */
+  .char-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+  .char-card { padding: 12px; }
+  .char-card .avatar { width: 48px; height: 48px; font-size: 26px; }
+
+  /* 侧边栏：在手机上紧凑一些 */
+  .sidebar { padding: 10px; gap: 8px; }
+  .sidebar-head .brand { font-size: 16px; }
+  .new-chat { padding: 10px; font-size: 14px; }
+  .icon-btn { width: 38px; height: 38px; font-size: 16px; }
+
+  /* 消息：气泡文字稍大、留白收紧 */
+  .messages { padding: 14px; gap: 14px; }
+  .bubble { font-size: 15px; padding: 10px 13px; line-height: 1.55; }
+  .msg .avatar { width: 32px; height: 32px; font-size: 17px; }
+  .msg-image { max-width: 240px; }
+  .msg-gen-img { min-height: 36px; padding: 6px 12px; font-size: 13px; }
+
+  /* 记忆条目：手机上按钮横排，避免按钮过窄 */
+  .mem-item { flex-direction: column; }
+  .mem-item .acts { flex-direction: row; }
+
+  /* 设置卡片按钮更大，方便手指点击 */
+  .btn { min-height: 44px; padding: 11px 18px; }
+  .btn.small { min-height: 36px; padding: 8px 12px; }
+
+  /* 顶部用户/设置按钮不挤压 */
+  .head-actions { gap: 4px; }
+}
+
+/* 通用：所有可滚动区域使用原生弹性滚动，避免橡皮筋穿透到 body */
+.list-wrap, .messages, .modal, .modal-body, .bg-presets, .char-grid,
+.refs-grid, .mem-list, .user-list, .login-card, .chars-modal .modal-body {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+/* 移动端菜单按钮（默认隐藏，仅 ≤720px 显示） */
+#btn-menu-toggle {
+  display: none;
+  width: 38px; height: 38px;
+  border-radius: 10px;
+  background: var(--surface); border: 1px solid var(--border); color: var(--text);
+  font-size: 18px; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+@media (max-width: 720px) {
+  #btn-menu-toggle { display: inline-flex; }
+}
+
+/* 移动端侧边栏遮罩（仅 ≤720px 显示） */
+#sidebar-backdrop {
+  display: none;
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 35;
+}
+@media (max-width: 720px) {
+  body.sidebar-open #sidebar-backdrop { display: block; }
 }
 
 /* ===== 登录屏 ===== */

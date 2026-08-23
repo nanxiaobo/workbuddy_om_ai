@@ -1,0 +1,8 @@
+在当前目录执行
+git add .
+git commit -m "提交"
+git push
+
+sudo systemctl stop workbuddy
+sudo systemctl start workbuddy
+sudo systemctl status workbuddy

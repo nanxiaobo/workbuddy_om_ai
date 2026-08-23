@@ -82,6 +82,8 @@ function openModal(id) {
 function closeModals() {
   $('#overlay').classList.add('hidden');
   $$('.modal').forEach((m) => m.classList.add('hidden'));
+  // 移动端：弹窗关闭后顺势收起侧边栏，避免下层抽屉遮挡聊天区
+  closeSidebar();
 }
 $('#overlay').addEventListener('click', closeModals);
 $$('[data-close]').forEach((b) => b.addEventListener('click', closeModals));
@@ -308,7 +310,27 @@ $$('.sidebar-tabs .tab').forEach((t) => {
     const tab = t.getAttribute('data-tab');
     $('#conv-list').classList.toggle('hidden', tab !== 'conv');
     $('#char-list').classList.toggle('hidden', tab !== 'char');
+    // 移动端切换 tab 后自动收起侧边栏
+    closeSidebar();
   });
+});
+
+/* 移动端：侧边栏抽屉开关 */
+function isMobile() { return window.matchMedia('(max-width: 720px)').matches; }
+function openSidebar()  { document.body.classList.add('sidebar-open'); }
+function closeSidebar() { document.body.classList.remove('sidebar-open'); }
+function toggleSidebar() {
+  if (document.body.classList.contains('sidebar-open')) closeSidebar();
+  else openSidebar();
+}
+$('#btn-menu-toggle').addEventListener('click', (e) => {
+  e.stopPropagation();
+  toggleSidebar();
+});
+$('#sidebar-backdrop').addEventListener('click', closeSidebar);
+// Esc 关闭侧边栏
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && document.body.classList.contains('sidebar-open')) closeSidebar();
 });
 
 $('#btn-new-chat').addEventListener('click', () => {
@@ -503,6 +525,7 @@ async function openConversation(vid) {
     renderHead();
     renderMessages(conv.messages || []);
     renderConversations();
+    closeSidebar(); // 移动端进入对话后自动收起侧边栏
   } catch (e) { toast('打开失败：' + e.message); }
 }
 
@@ -729,6 +752,27 @@ function autoGrow(el) {
   el.style.height = Math.min(el.scrollHeight, 140) + 'px';
 }
 $('#input').addEventListener('input', (e) => autoGrow(e.target));
+
+/* 移动端软键盘处理：键盘弹出时把消息区滚到底，并让 composer 跟随 visualViewport
+   visualViewport 在 iOS / Android Chrome / Edge 均可拿到键盘弹出后的可见高度。*/
+(function setupMobileKeyboard() {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  // 用 --vv-height 暴露当前可见视口高度，供 CSS（dvh）之外的精细调整使用
+  function sync() {
+    document.documentElement.style.setProperty('--vv-height', vv.height + 'px');
+  }
+  vv.addEventListener('resize', sync);
+  vv.addEventListener('scroll', sync);
+  sync();
+})();
+/* 输入框聚焦（键盘弹出）后，延迟滚动消息到底，保证最后一条可见 */
+$('#input').addEventListener('focus', () => {
+  setTimeout(() => {
+    const box = $('#messages');
+    if (box) box.scrollTop = box.scrollHeight;
+  }, 250);
+});
 
 /* 清空上下文 */
 $('#btn-clear').addEventListener('click', async () => {
