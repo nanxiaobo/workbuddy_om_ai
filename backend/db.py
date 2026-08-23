@@ -637,6 +637,25 @@ def list_conversations(character_id: str = None, user: str = None) -> list:
         sql += " ORDER BY updated_at DESC"
         rows = conn.execute(sql, params).fetchall()
         result = []
+        # 用 IN 子查询一次取出所有候选会话的最新一条消息，避免 N+1
+        ids = [r["id"] for r in rows]
+        last_msg_map = {}
+        if ids:
+            placeholders = ",".join("?" for _ in ids)
+            lm_rows = conn.execute(
+                f"""SELECT m.conversation_id AS cid, m.content AS content, m.role AS role, m.created_at AS created_at
+                    FROM messages m
+                    INNER JOIN (
+                        SELECT conversation_id, MAX(created_at) AS max_at
+                        FROM messages GROUP BY conversation_id
+                    ) latest ON latest.conversation_id = m.conversation_id AND latest.max_at = m.created_at
+                    WHERE m.conversation_id IN ({placeholders})""",
+                ids,
+            ).fetchall()
+            for r in lm_rows:
+                last_msg_map[r["cid"]] = {
+                    "content": r["content"], "role": r["role"], "created_at": r["created_at"]
+                }
         for r in rows:
             d = dict(r)
             cnt = conn.execute(
@@ -644,6 +663,10 @@ def list_conversations(character_id: str = None, user: str = None) -> list:
                 (d["id"],),
             ).fetchone()["c"]
             d["message_count"] = cnt
+            lm = last_msg_map.get(d["id"])
+            d["last_message"] = lm["content"] if lm else ""
+            d["last_message_role"] = lm["role"] if lm else ""
+            d["last_message_at"] = lm["created_at"] if lm else d.get("updated_at", "")
             result.append(d)
         return result
     finally:

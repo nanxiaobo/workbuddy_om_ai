@@ -327,21 +327,54 @@ function renderConversations() {
   }
   state.conversations.forEach((v) => {
     const ch = state.characters.find((c) => c.id === v.character_id) || {};
+    const preview = (v.last_message || '').replace(/\s+/g, ' ').trim().slice(0, 36) || '（暂无消息）';
+    const timeStr = relativeTime(v.last_message_at || v.updated_at);
+    const isMine = v.last_message_role === 'user';
+    const previewHtml = isMine
+      ? `<span class="conv-prefix">你：</span>${escapeHTML(preview)}`
+      : escapeHTML(preview);
     const el = document.createElement('div');
     el.className = 'conv-item' + (state.currentConv && state.currentConv.id === v.id ? ' active' : '');
+    el.title = v.title || '新对话';
     el.innerHTML = `
       ${avatarHTML(ch.avatar, 'avatar')}
       <div class="conv-meta">
-        <div class="conv-title">${escapeHTML(v.title || '新对话')}</div>
-        <div class="conv-sub">${escapeHTML(ch.name || '未知角色')} · ${v.message_count || 0} 条</div>
-      </div>
-      <button class="conv-del" title="删除">🗑</button>`;
+        <div class="conv-row1">
+          <div class="conv-title">${escapeHTML(ch.name || '未知角色')}</div>
+          <div class="conv-time">${timeStr}</div>
+        </div>
+        <div class="conv-row2">
+          <div class="conv-preview">${previewHtml}</div>
+          <button class="conv-del" title="删除">🗑</button>
+        </div>
+      </div>`;
     el.addEventListener('click', (e) => {
       if (e.target.classList.contains('conv-del')) { deleteConversation(v.id); return; }
       openConversation(v.id);
     });
     list.appendChild(el);
   });
+}
+
+/* 相对时间显示：刚刚/N 分钟前/今天 HH:MM/昨天 HH:MM/YYYY-MM-DD HH:MM */
+function relativeTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const now = new Date();
+  const diffMs = now - d;
+  const diffMin = Math.floor(diffMs / 60000);
+  const pad = (n) => (n < 10 ? '0' + n : '' + n);
+  if (diffMin < 1) return '刚刚';
+  if (diffMin < 60) return diffMin + ' 分钟前';
+  const sameDay = d.toDateString() === now.toDateString();
+  if (sameDay) return '今天 ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  const yest = new Date(now); yest.setDate(now.getDate() - 1);
+  if (d.toDateString() === yest.toDateString()) return '昨天 ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  // 7 天内显示星期
+  const dayDiff = Math.floor((now - d) / 86400000);
+  if (dayDiff < 7) return '周' + '日一二三四五六'[d.getDay()] + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
 }
 
 /* 侧边栏 tab 切换 */
@@ -626,8 +659,48 @@ function renderMessages(messages) {
     clearChat();
     return;
   }
-  messages.forEach((m) => renderMsgEl(m, false));
+  let prevDate = null;       // 上条消息的日期标签
+  let prevRole = null;       // 上条消息的角色（用于分组）
+  let prevTime = null;       // 上条消息的时间（Date 对象）
+  messages.forEach((m) => {
+    const dt = m.created_at ? new Date(m.created_at) : new Date();
+    const dateLabel = dateLabelOf(dt);
+    // 新一天：插入日期分隔
+    if (dateLabel !== prevDate) {
+      const sep = document.createElement('div');
+      sep.className = 'msg-day-sep';
+      sep.textContent = dateLabel;
+      box.appendChild(sep);
+      prevDate = dateLabel;
+      prevRole = null; // 日期切换视为新分组起点
+      prevTime = null;
+    }
+    const wrap = renderMsgEl(m, false);
+    // 分组规则：换角色 / 与上一条间隔 > 5 分钟 → 显示时间戳
+    const showTime = !prevRole || prevRole !== m.role ||
+                     (prevTime && (dt.getTime() - prevTime.getTime() > 5 * 60 * 1000));
+    if (showTime) wrap.classList.add('msg-with-time');
+    prevRole = m.role;
+    prevTime = dt;
+  });
   box.scrollTop = box.scrollHeight;
+}
+
+/* 日期标签：今天 / 昨天 / 周X / 具体日期 */
+function dateLabelOf(d) {
+  const now = new Date();
+  const same = (a, b) => a.toDateString() === b.toDateString();
+  if (same(d, now)) return '今天';
+  const yest = new Date(now); yest.setDate(now.getDate() - 1);
+  if (same(d, yest)) return '昨天';
+  const dayDiff = Math.floor((now - d) / 86400000);
+  if (dayDiff < 7) return '周' + '日一二三四五六'[d.getDay()];
+  const pad = (n) => (n < 10 ? '0' + n : '' + n);
+  return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+}
+function formatTimeShort(d) {
+  const pad = (n) => (n < 10 ? '0' + n : '' + n);
+  return pad(d.getHours()) + ':' + pad(d.getMinutes());
 }
 
 /* 渲染一条完整消息（含已生成的配图与角色消息的「生图」按钮） */
@@ -640,9 +713,11 @@ function renderMsgEl(m, scroll = true) {
   const wrap = document.createElement('div');
   wrap.className = 'msg ' + (m.role === 'user' ? 'user' : 'bot');
   wrap.dataset.mid = m.id;
+  const timeStr = m.created_at ? formatTimeShort(new Date(m.created_at)) : '';
   wrap.innerHTML = `
     ${avatarHTML(av, 'avatar')}
-    <div class="bubble">${escapeHTML(m.content)}</div>`;
+    <div class="bubble">${escapeHTML(m.content)}</div>
+    <div class="msg-time">${timeStr}</div>`;
   // 配图区
   const imgWrap = document.createElement('div');
   imgWrap.className = 'msg-image';
@@ -677,6 +752,35 @@ function appendMessage(role, content, scroll = true) {
   box.appendChild(wrap);
   if (scroll) box.scrollTop = box.scrollHeight;
   return wrap.querySelector('.bubble');
+}
+
+/* AI 思考中的三点点动画占位（在聊天末尾插入，整组包头像+气泡，返回包装容器） */
+function appendTypingIndicator() {
+  const box = $('#messages');
+  const empty = box.querySelector('.empty-hint');
+  if (empty) empty.remove();
+  const c = state.currentCharacter || {};
+  const av = c.avatar || '🤖';
+  const wrap = document.createElement('div');
+  wrap.className = 'msg bot typing';
+  wrap.innerHTML = `
+    ${avatarHTML(av, 'avatar')}
+    <div class="bubble">
+      <span class="typing-dots"><span></span><span></span><span></span></span>
+    </div>`;
+  box.appendChild(wrap);
+  box.scrollTop = box.scrollHeight;
+  return wrap;
+}
+
+/* 把 typing 占位替换为真正可写的 assistant 气泡；返回气泡元素 */
+function typingToBubble(typingEl) {
+  if (!typingEl) return null;
+  const bubble = typingEl.querySelector('.bubble');
+  if (!bubble) return null;
+  bubble.innerHTML = '<span class="cursor"></span>';
+  typingEl.classList.remove('typing');
+  return bubble;
 }
 
 /* 为某条角色消息生成配图（基于角色设定 + 该消息内容 + 角色头像/参考图） */
@@ -730,8 +834,8 @@ async function sendMessage() {
   input.value = ''; autoGrow(input);
 
   appendMessage('user', text);
-  const bubble = appendMessage('assistant', '');
-  bubble.innerHTML = '<span class="cursor"></span>';
+  const typingEl = appendTypingIndicator();
+  let bubble = null;
 
   const body = { conversation_id: state.currentConv.id, user_message: text };
   try {
@@ -762,13 +866,16 @@ async function sendMessage() {
         try {
           const evt = JSON.parse(json);
           if (evt.type === 'delta') {
+            if (!bubble) bubble = typingToBubble(typingEl); // 首 token 到达才把点点换成真气泡
             full += evt.content;
             bubble.textContent = full;
             bubble.appendChild(Object.assign(document.createElement('span'), { className: 'cursor' }));
             $('#messages').scrollTop = $('#messages').scrollHeight;
           } else if (evt.type === 'error') {
+            if (!bubble) bubble = typingToBubble(typingEl);
             bubble.textContent = '⚠️ ' + evt.message;
           } else if (evt.type === 'done') {
+            if (!bubble) bubble = typingToBubble(typingEl);
             bubble.textContent = evt.content;
             full = evt.content;
           } else if (evt.type === 'inner') {
@@ -787,6 +894,7 @@ async function sendMessage() {
       if (updated) { state.currentConv = updated; renderHead(); }
     }
   } catch (e) {
+    if (!bubble) bubble = typingToBubble(typingEl);
     bubble.textContent = '⚠️ 发送失败：' + e.message;
   } finally {
     sending = false;
@@ -803,6 +911,145 @@ function autoGrow(el) {
   el.style.height = Math.min(el.scrollHeight, 140) + 'px';
 }
 $('#input').addEventListener('input', (e) => autoGrow(e.target));
+
+/* ========== 表情面板：常用 emoji，点选插入到输入框光标位置 ========== */
+const EMOJI_LIST = [
+  '😀','😁','😂','🤣','😊','😍','🥰','😘','😎','🤩','🥺','😢','😭','😡','🤔','🙄',
+  '😴','🤗','🤭','🤫','🤐','😏','😬','😮','😴','🤤','😪','😵','🥶','🥵','🤯','🤠',
+  '🥳','😇','🤡','👻','💀','👽','🤖','😺','😸','😻','😼','😽','🙀','😿','😾','🤲',
+  '👍','👎','👌','✌️','🤞','🤟','🤘','🤙','👈','👉','👆','👇','✋','🤚','🖐️','🖖',
+  '👏','🙌','👐','🤝','🙏','✍️','💪','🦾','🦵','🦿','🦶','👂','🦻','👃','🧠','👀',
+  '❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❣️','💕','💞','💓','💗','💖',
+  '💘','💝','💟','✨','⭐','🌟','💫','🔥','💥','💯','🎉','🎊','🎁','🎈','🎀','🌹',
+];
+(function buildEmojiPanel() {
+  const panel = $('#emoji-panel');
+  if (!panel) return;
+  EMOJI_LIST.forEach((e) => {
+    const s = document.createElement('span');
+    s.textContent = e;
+    s.setAttribute('role', 'option');
+    s.addEventListener('click', () => insertAtCursor($('#input'), e));
+    panel.appendChild(s);
+  });
+})();
+function insertAtCursor(input, text) {
+  if (!input) return;
+  const start = input.selectionStart ?? input.value.length;
+  const end   = input.selectionEnd   ?? input.value.length;
+  input.value = input.value.slice(0, start) + text + input.value.slice(end);
+  input.focus();
+  const pos = start + text.length;
+  input.setSelectionRange(pos, pos);
+  autoGrow(input);
+}
+$('#btn-emoji').addEventListener('click', () => {
+  const p = $('#emoji-panel');
+  if (!p) return;
+  p.classList.toggle('hidden');
+});
+document.addEventListener('click', (e) => {
+  const p = $('#emoji-panel');
+  if (!p || p.classList.contains('hidden')) return;
+  if (!e.target.closest('#emoji-panel') && !e.target.closest('#btn-emoji')) {
+    p.classList.add('hidden');
+  }
+});
+
+/* ========== 语音输入：Web Speech API（Chrome / Edge 支持） ========== */
+(function setupVoiceInput() {
+  const btn = $('#btn-mic');
+  if (!btn) return;
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    btn.title = '当前浏览器不支持语音输入';
+    btn.disabled = true;
+    btn.style.opacity = '0.5';
+    return;
+  }
+  let rec = null;
+  let recognizing = false;
+  btn.addEventListener('click', () => {
+    if (recognizing) {
+      try { rec.stop(); } catch (_) {}
+      return;
+    }
+    const input = $('#input');
+    const lang = (navigator.language || 'zh-CN').startsWith('zh') ? 'zh-CN' : 'en-US';
+    rec = new SR();
+    rec.lang = lang;
+    rec.interimResults = true;
+    rec.continuous = false;
+    let base = input.value;
+    rec.onstart = () => {
+      recognizing = true;
+      btn.classList.add('recording');
+      btn.textContent = '⏹';
+      toast('🎤 正在聆听…点击停止');
+    };
+    rec.onresult = (e) => {
+      let interim = '', finalText = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const r = e.results[i];
+        if (r.isFinal) finalText += r[0].transcript;
+        else interim += r[0].transcript;
+      }
+      input.value = base + finalText + interim;
+      autoGrow(input);
+    };
+    rec.onerror = (e) => {
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+        toast('请允许麦克风权限后重试');
+      } else if (e.error !== 'aborted') {
+        toast('语音识别失败：' + e.error);
+      }
+    };
+    rec.onend = () => {
+      recognizing = false;
+      btn.classList.remove('recording');
+      btn.textContent = '🎤';
+    };
+    try { rec.start(); } catch (_) {}
+  });
+})();
+
+/* 浮动「回到最新」按钮：滚到一定距离之上才显示 */
+(function setupScrollBottom() {
+  const box = $('#messages');
+  const btn = $('#btn-scroll-bottom');
+  if (!box || !btn) return;
+  const THRESHOLD = 240; // 距底超过 240px 才显示
+  function sync() {
+    const distFromBottom = box.scrollHeight - box.scrollTop - box.clientHeight;
+    btn.classList.toggle('visible', distFromBottom > THRESHOLD);
+  }
+  box.addEventListener('scroll', sync, { passive: true });
+  btn.addEventListener('click', () => {
+    box.scrollTo({ top: box.scrollHeight, behavior: 'smooth' });
+  });
+  // 初始 + 任何内容变化后都需要刷新（用 mutation observer 监听消息追加）
+  const mo = new MutationObserver(() => {
+    // 仅在用户已经在底部时自动跟随；否则保持可见，按钮让用户决定
+    const distFromBottom = box.scrollHeight - box.scrollTop - box.clientHeight;
+    if (distFromBottom < 80) {
+      box.scrollTop = box.scrollHeight;
+      btn.classList.remove('visible');
+    } else {
+      sync();
+    }
+  });
+  mo.observe(box, { childList: true, subtree: true });
+})();
+
+/* 空状态快捷建议：一键填充并发送 */
+document.addEventListener('click', async (e) => {
+  const chip = e.target.closest('.quick-chip');
+  if (!chip) return;
+  const text = chip.getAttribute('data-prompt') || chip.textContent.trim();
+  if (!state.currentConv) { openCharsModal(); return; }
+  $('#input').value = text;
+  await sendMessage();
+});
 
 /* 移动端软键盘处理：键盘弹出时把消息区滚到底，并让 composer 跟随 visualViewport
    visualViewport 在 iOS / Android Chrome / Edge 均可拿到键盘弹出后的可见高度。*/

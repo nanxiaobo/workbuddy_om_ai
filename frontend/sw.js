@@ -1,5 +1,5 @@
 /* service worker —— 仅缓存应用外壳，API 与流式接口一律走网络，避免破坏对话 */
-const CACHE = 'ai-chat-shell-v11';          // 每次大版本更新请改版本号
+const CACHE = 'ai-chat-shell-v12';          // 每次大版本更新请改版本号
 const SHELL = [
   './',
   './index.html',
