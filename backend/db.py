@@ -658,17 +658,37 @@ def get_character(cid: str) -> dict:
 
 
 def list_characters(user: str = None) -> list:
+    """列表视图：不返回 refs 列（refs 内是 dataURL，体积大；列表用不到，按需在 get_character 取）。
+    返回 refs_count 字段方便前端显示「已配置 N 张参考图」提示。"""
     conn = get_conn()
     try:
+        # 显式列出所需列，避免 SELECT * 把巨型 refs dataURL 一起拉回来
+        cols = (
+            "id, name, avatar, persona, personality, speaking_style, "
+            "example_dialogues, world_setting, greeting, tags, user, "
+            "created_at, updated_at, refs"
+        )
         if user:
             rows = conn.execute(
-                "SELECT * FROM characters WHERE user=? ORDER BY updated_at DESC", (user,)
+                f"SELECT {cols} FROM characters WHERE user=? ORDER BY updated_at DESC", (user,)
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT * FROM characters ORDER BY updated_at DESC"
+                f"SELECT {cols} FROM characters ORDER BY updated_at DESC"
             ).fetchall()
-        return [dict(r) for r in rows]
+        result = []
+        for r in rows:
+            d = dict(r)
+            # 列表只回 refs 数量（不回 dataURL 本体），节省带宽与前端内存
+            raw_refs = d.pop("refs", None) or "[]"
+            try:
+                refs_list = json.loads(raw_refs) if isinstance(raw_refs, str) else (raw_refs or [])
+            except Exception:
+                refs_list = []
+            d["refs_count"] = len(refs_list)
+            d["refs"] = []   # 占位：列表视图不返回 dataURL，编辑时单独 GET /api/characters/{id} 取
+            result.append(d)
+        return result
     finally:
         conn.close()
 

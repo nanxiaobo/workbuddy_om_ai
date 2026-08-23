@@ -309,7 +309,7 @@ function renderCharacters() {
       <div class="cdesc">${escapeHTML(desc)}</div>
       <div class="cacts">
         <button class="mini-btn" data-act="edit">编辑</button>
-        <button class="mini-btn" data-act="del">删除</button>
+        <button class="mini-btn danger" data-act="del">删除</button>
       </div>`;
     el.addEventListener('click', (e) => {
       const act = e.target.getAttribute('data-act');
@@ -353,9 +353,12 @@ function renderSidebarCharacters() {
       </div>
       <div class="acts">
         <button class="mini-btn" data-act="edit" title="编辑">编辑</button>
+        <button class="mini-btn danger" data-act="del" title="删除">删除</button>
       </div>`;
     el.addEventListener('click', (e) => {
-      if (e.target.getAttribute('data-act') === 'edit') { openCharEditor(c.id); return; }
+      const act = e.target.getAttribute('data-act');
+      if (act === 'edit') { openCharEditor(c.id); return; }
+      if (act === 'del') { deleteCharacter(c.id); return; }
       // 点击角色卡片 → 直接开始/恢复对话（侧边栏会自动收起）
       startConversation(c.id);
     });
@@ -467,10 +470,18 @@ function openCharsModal() {
 
 /* 新建角色 */
 $('#btn-new-char').addEventListener('click', () => openCharEditor(null));
-function openCharEditor(id) {
+async function openCharEditor(id) {
   state.editingCharId = id;
-  const c = id ? state.characters.find((x) => x.id === id) : {};
+  let c = {};
+  if (id) {
+    // 列表接口不返回 refs（省带宽），编辑时单独拉完整角色卡
+    try { c = await api('GET', '/api/characters/' + id); }
+    catch (e) { toast('加载角色失败：' + e.message); return; }
+  }
   $('#char-edit-title').textContent = id ? '编辑角色' : '新建角色';
+  // 编辑模式显示「删除此角色」按钮，新建模式隐藏
+  const delBtn = $('#btn-del-char');
+  if (delBtn) delBtn.classList.toggle('hidden', !id);
   $('#ce-name').value = c.name || '';
   $('#ce-avatar').value = c.avatar && !c.avatar.startsWith('data:image') ? c.avatar : '';
   $('#ce-avatar-preview').innerHTML = avatarHTML(c.avatar || '🙂', 'avatar preview');
@@ -504,20 +515,71 @@ function renderRefs() {
   });
 }
 
-/* 参考图上传：多张 dataURL 追加到 editingRefs */
-$('#ce-refs-upload').addEventListener('click', () => $('#ce-refs-file').click());
-$('#ce-refs-file').addEventListener('change', (e) => {
-  const files = Array.from(e.target.files || []);
-  if (!files.length) return;
-  let pending = files.length;
-  files.forEach((file) => {
+/* 图片压缩工具：把上传的图压缩到 maxSize 以内（保宽高比），JPEG 0.85 质量。
+ * 大幅减小 dataURL 体积（5MB 照片 → ~150KB），避免角色卡保存卡顿、列表接口超载。
+ * PNG/带透明通道的图会保留为 PNG（quality 仅对 JPEG 有效）。
+ * 返回 Promise<dataURL>。 */
+function compressImage(file, maxSize = 1024, quality = 0.85) {
+  return new Promise((resolve, reject) => {
+    if (!file.type.startsWith('image/')) {
+      reject(new Error('仅支持图片文件'));
+      return;
+    }
     const reader = new FileReader();
+    reader.onerror = () => reject(new Error('读取文件失败'));
     reader.onload = () => {
-      editingRefs.push(reader.result);
-      if (--pending === 0) renderRefs();
+      const img = new Image();
+      img.onerror = () => reject(new Error('图片解码失败'));
+      img.onload = () => {
+        let { width, height } = img;
+        // 等比缩放到 maxSize 以内
+        if (width > maxSize || height > maxSize) {
+          const scale = maxSize / Math.max(width, height);
+          width = Math.round(width * scale);
+          height = Math.round(height * scale);
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        // 带透明通道的 PNG 保留格式，其他统一 JPEG 提升压缩率
+        const isPng = file.type === 'image/png';
+        const mime = isPng ? 'image/png' : 'image/jpeg';
+        try {
+          resolve(canvas.toDataURL(mime, isPng ? undefined : quality));
+        } catch (err) {
+          reject(new Error('图片压缩失败：' + err.message));
+        }
+      };
+      img.src = reader.result;
     };
     reader.readAsDataURL(file);
   });
+}
+
+/* 参考图上传：压缩后追加到 editingRefs */
+$('#ce-refs-upload').addEventListener('click', () => $('#ce-refs-file').click());
+$('#ce-refs-file').addEventListener('change', async (e) => {
+  const files = Array.from(e.target.files || []);
+  if (!files.length) return;
+  const uploadBtn = $('#ce-refs-upload');
+  const originalText = uploadBtn.textContent;
+  uploadBtn.disabled = true; uploadBtn.textContent = `压缩 ${files.length} 张中…`;
+  let ok = 0, fail = 0;
+  for (const file of files) {
+    try {
+      const dataURL = await compressImage(file, 1024, 0.85);
+      editingRefs.push(dataURL);
+      ok++;
+    } catch (err) {
+      console.warn('参考图压缩失败', file.name, err);
+      fail++;
+    }
+  }
+  renderRefs();
+  uploadBtn.disabled = false; uploadBtn.textContent = originalText;
+  if (fail) toast(`已添加 ${ok} 张，${fail} 张失败`);
   e.target.value = '';
 });
 
@@ -526,21 +588,28 @@ $('#ce-avatar').addEventListener('input', (e) => {
   $('#ce-avatar-preview').innerHTML = avatarHTML(e.target.value || '🙂', 'avatar preview');
 });
 $('#ce-upload').addEventListener('click', () => $('#ce-upload-file').click());
-$('#ce-upload-file').addEventListener('change', (e) => {
+$('#ce-upload-file').addEventListener('change', async (e) => {
   const file = e.target.files[0];
   if (!file) return;
-  const reader = new FileReader();
-  reader.onload = () => {
-    const data = reader.result;
-    // 头像存为 dataURL，随角色卡导出可携带
+  const btn = $('#ce-upload');
+  const originalText = btn.textContent;
+  btn.disabled = true; btn.textContent = '压缩中…';
+  try {
+    const data = await compressImage(file, 512, 0.85);   // 头像压到 512px 即可
     $('#ce-avatar').value = data;
     $('#ce-avatar-preview').innerHTML = `<div class="avatar preview"><img src="${data}"></div>`;
-  };
-  reader.readAsDataURL(file);
+  } catch (err) {
+    toast('头像处理失败：' + err.message);
+  } finally {
+    btn.disabled = false; btn.textContent = originalText;
+  }
 });
 
 /* 保存角色 */
 $('#btn-save-char').addEventListener('click', async () => {
+  const saveBtn = $('#btn-save-char');
+  const originalText = saveBtn.textContent;
+  saveBtn.disabled = true; saveBtn.textContent = '保存中…';
   const payload = {
     name: $('#ce-name').value.trim() || '未命名角色',
     avatar: $('#ce-avatar').value.trim(),
@@ -565,6 +634,7 @@ $('#btn-save-char').addEventListener('click', async () => {
     await loadCharacters();
     renderCharacters();
   } catch (e) { toast('保存失败：' + e.message); }
+  finally { saveBtn.disabled = false; saveBtn.textContent = originalText; }
 });
 
 /* 导出角色卡 */
@@ -622,6 +692,12 @@ async function deleteCharacter(id) {
     toast('已删除');
   } catch (e) { toast('删除失败：' + e.message); }
 }
+
+/* 编辑器内的「删除此角色」按钮：复用 deleteCharacter + 关闭弹窗 */
+$('#btn-del-char').addEventListener('click', () => {
+  if (!state.editingCharId) return;
+  deleteCharacter(state.editingCharId).then(() => { closeModals(); });
+});
 
 /* =====================================================================
  * 会话 / 聊天

@@ -16,7 +16,7 @@
   <link rel="manifest" href="manifest.json" />
   <link rel="icon" href="icons/icon-192.png" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
-  <link rel="stylesheet" href="/css/style.css?v=23" />
+  <link rel="stylesheet" href="/css/style.css?v=25" />
 </head>
 <body>
   <!-- 登录屏（仅管理员，默认不支持注册；管理员可在设置中添加用户） -->
@@ -332,6 +332,7 @@
         <input id="ce-tags" placeholder="猫娘, 恋愛, 校园" />
       </label>
       <div class="modal-foot">
+        <button class="btn danger hidden" id="btn-del-char">🗑 删除此角色</button>
         <button class="btn ghost" id="btn-export-char">导出角色卡</button>
         <button class="btn primary" id="btn-save-char">保存</button>
       </div>
@@ -356,7 +357,7 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script src="/js/shared.js?v=23"></script>
-  <script src="/js/app.js?v=23"></script>
+  <script src="/js/shared.js?v=25"></script>
+  <script src="/js/app.js?v=25"></script>
 </body>
 </html>

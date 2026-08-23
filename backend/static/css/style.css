@@ -403,6 +403,10 @@ input[type="range"] { padding: 0; accent-color: var(--accent); }
 .btn.primary:hover { filter: brightness(1.08); }
 .btn.ghost { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
 .btn.ghost:hover { background: var(--surface-2); }
+.btn.danger { background: transparent; color: var(--danger); border: 1px solid var(--danger); }
+.btn.danger:hover { background: var(--danger); color: #fff; }
+.mini-btn.danger { color: var(--danger); border-color: rgba(255,90,95,.35); }
+.mini-btn.danger:hover { background: rgba(255,90,95,.12); color: var(--danger); border-color: var(--danger); }
 
 /* 角色库 */
 .char-toolbar { display: flex; gap: 10px; }
